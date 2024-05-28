@@ -25,6 +25,7 @@ import {
   getNamedType,
   isInputObjectType,
   isInterfaceType,
+  isNamedType,
   isObjectType,
   isUnionType,
 } from './definition.js';
@@ -198,7 +199,7 @@ export class GraphQLSchema {
       // Directives are not validated until validateSchema() is called.
       if (isDirective(directive)) {
         for (const arg of directive.args) {
-          collectReferencedTypes(arg.type, allReferencedTypes);
+          collectReferencedTypes(getNamedType(arg.type), allReferencedTypes);
         }
       }
     }
@@ -427,33 +428,46 @@ export interface GraphQLSchemaNormalizedConfig extends GraphQLSchemaConfig {
 }
 
 function collectReferencedTypes(
-  type: GraphQLType,
+  root: GraphQLNamedType,
   typeSet: Set<GraphQLNamedType>,
 ): Set<GraphQLNamedType> {
-  const namedType = getNamedType(type);
+  const typesToCheck: Array<GraphQLNamedType> = [root];
 
-  if (!typeSet.has(namedType)) {
+  while (typesToCheck.length) {
+    const namedType = typesToCheck.pop();
+
+    if (!namedType || typeSet.has(namedType)) {
+      continue;
+    }
+
     typeSet.add(namedType);
+
+    const typesToAdd: Array<GraphQLNamedType> = [];
+
     if (isUnionType(namedType)) {
       for (const memberType of namedType.getTypes()) {
-        collectReferencedTypes(memberType, typeSet);
+        typesToAdd.push(getNamedType(memberType));
       }
     } else if (isObjectType(namedType) || isInterfaceType(namedType)) {
       for (const interfaceType of namedType.getInterfaces()) {
-        collectReferencedTypes(interfaceType, typeSet);
+        typesToAdd.push(interfaceType);
       }
 
       for (const field of Object.values(namedType.getFields())) {
-        collectReferencedTypes(field.type, typeSet);
+        typesToAdd.push(getNamedType(field.type));
+
         for (const arg of field.args) {
-          collectReferencedTypes(arg.type, typeSet);
+          typesToAdd.push(getNamedType(arg.type));
         }
       }
     } else if (isInputObjectType(namedType)) {
       for (const field of Object.values(namedType.getFields())) {
-        collectReferencedTypes(field.type, typeSet);
+        typesToAdd.push(getNamedType(field.type));
       }
     }
+
+    typesToAdd.reverse()
+    typesToAdd.forEach((t) => typesToCheck.push(t));
   }
 
   return typeSet;
